@@ -10,12 +10,16 @@ open System.Text.RegularExpressions
 /// low-level driver for RS485 Nanotec stepper motor drivers
 module Stepper =
 
+    [<Literal>]
+    let Debug = false
+
     type StepperIdT = int
 
     type ConfigT = {
         Id:             StepperIdT;
         AnglePerStep:   float;
         StepMode:       int;    
+        StartVel:       float;
     }
 
     type StepperT = 
@@ -25,6 +29,7 @@ module Stepper =
         member this.Id = this.Config.Id
         member this.AnglePerStep = this.Config.AnglePerStep
         member this.StepMode = this.Config.StepMode
+        member this.StartVel = this.Config.StartVel
 
     type StatusT = {
         Ready:          bool;
@@ -51,14 +56,14 @@ module Stepper =
             | Some arg -> sprintf "%+d" arg
             | None -> ""
         let msgStr = sprintf "#%d%s%s\r" stepper.Id cmd argStr
-        //printfn "sending: %s" msgStr
+        //if Debug then printfn "sending: %s" msgStr
         stepper.Port.Write msgStr
 
     let private receiveMsg (stepper: StepperT) = 
         let msgStr = stepper.Port.ReadTo "\r"
-        //printfn "received: %s" msgStr
+        //if Debug then printfn "received: %s" msgStr
 
-        let m = Regex.Match(msgStr, @"(\d+)([!-*,./:-~]+)([+-]?\d+)?$")
+        let m = Regex.Match(msgStr, @"^(\d+)([!-*,./:-~]+)([+-]?\d+)?$")
         if not m.Success then
             failwithf "Stepper received malformed reply message: %s" msgStr
         let id = int m.Groups.[1].Value
@@ -91,7 +96,7 @@ module Stepper =
     let private isBitSet bit x = x &&& (1 <<< bit) <> 0 
 
     let private accelToArg accel =
-        int ((3000. / ((float accel) / 1000. + 11.7) ** 2.))
+        int ((3000. / ((float accel) / 1000. + 11.7)) ** 2.)
 
     let private angleToSteps (angle: float) (stepper: StepperT) =
         angle * (float stepper.StepMode) / stepper.AnglePerStep |> int
@@ -134,8 +139,8 @@ module Stepper =
     let setFollowCmd cmd stepper =          sendAndConfirm (Msg ("N", Some cmd)) stepper  
     let resetPosErr pos stepper =           sendAndConfirm (Msg ("D", Some pos)) stepper
     let start stepper =                     sendAndConfirm (Msg ("A", None)) stepper
-    let stop stepper =                      sendAndConfirm (Msg ("S", Some 0)) stepper
-    let quickStop stepper =                 sendAndConfirm (Msg ("S", Some 1)) stepper
+    let stop stepper =                      sendAndConfirm (Msg ("S", Some 1)) stepper
+    let quickStop stepper =                 sendAndConfirm (Msg ("S", Some 0)) stepper
 
 
     let getPos stepper =
@@ -145,7 +150,7 @@ module Stepper =
     let driveTo pos vel accel decel stepper =
         setPositioningMode Absolute stepper
         setTargetPos (angleToSteps pos stepper) stepper
-        setStartStepsPerSec 1 stepper
+        setStartStepsPerSec (angleToSteps stepper.StartVel stepper) stepper
         setDriveStepsPerSec (angleToSteps vel stepper) stepper
         setAccel (angleToSteps accel stepper) stepper
         setDecel (angleToSteps decel stepper) stepper
@@ -162,7 +167,7 @@ module Stepper =
 
         setPositioningMode Velocity stepper
         setDirection dir stepper
-        setStartStepsPerSec 1 stepper
+        setStartStepsPerSec (angleToSteps stepper.StartVel stepper) stepper
         setDriveStepsPerSec (angleToSteps absVel stepper) stepper
         setAccel (angleToSteps accel stepper) stepper
         setDecel (angleToSteps decel stepper) stepper
@@ -182,7 +187,7 @@ module Stepper =
     let externalReferencing direction vel accel stepper =
         setPositioningMode ExternalReferencing stepper
         setDirection direction stepper
-        setStartStepsPerSec 1 stepper
+        setStartStepsPerSec (angleToSteps stepper.StartVel stepper) stepper
         setDriveStepsPerSec (angleToSteps vel stepper) stepper
         setAccel (angleToSteps accel stepper) stepper
         setDecel (angleToSteps accel stepper) stepper
@@ -215,10 +220,15 @@ module XYTable =
     type MsgT =
         | MsgHome
         | MsgDriveTo of XYTupleT * XYTupleT * XYTupleT * XYTupleT
-        | MsgDriveWithVel of XYTupleT * XYTupleT * XYTupleT
+        | MsgDriveWithVel of XYTupleT * XYTupleT 
         | MsgStop of XYTupleT
 
-    type MsgWithReplyT = MsgT * AsyncReplyChannel<unit>
+    type ReplyT =
+        | ReplyOk
+        | ReplyNotHomed
+        | ReplyOutOfRange
+
+    type MsgWithReplyT = MsgT * AsyncReplyChannel<ReplyT>
 
     type XYTableT (config: XYTableConfigT) =
 
@@ -237,10 +247,10 @@ module XYTable =
                 Stepper.quickStop yStepper
 
         let posInRange (x, y) =
-            0. <= x && x <= config.X.MaxPos && 0. <= y && y <= config.Y.MaxPos
+            -0.2 <= x && x <= config.X.MaxPos && -0.2 <= y && y <= config.Y.MaxPos
 
         [<VolatileField>]
-        let mutable currentPos = Stepper.getPos xStepper, Stepper.getPos yStepper
+        let mutable currentPos = 0., 0.
         
         [<VolatileField>]
         let mutable currentStatus = Stepper.getStatus xStepper, Stepper.getStatus yStepper
@@ -254,30 +264,50 @@ module XYTable =
         [<VolatileField>]
         let mutable sentinelThreadShouldRun = true
 
+        let fetchPos () = 
+            let xPos, yPos = Stepper.getPos xStepper, Stepper.getPos yStepper
+            let xPos = if config.X.Home = Stepper.Right then -xPos else xPos
+            let yPos = if config.Y.Home = Stepper.Right then -yPos else yPos
+            xPos / config.X.DegPerMM, yPos / config.Y.DegPerMM
+
+        let fetchStatus () =
+            Stepper.getStatus xStepper, Stepper.getStatus yStepper
+
         let readyEventInt = new Event<_>()
         let readyEvent = readyEventInt.Publish
 
         let sentinelThread = Thread(fun () -> 
             while sentinelThreadShouldRun do
                 lock port (fun () ->
-                    currentPos <- Stepper.getPos xStepper, Stepper.getPos yStepper                    
-                    currentStatus <- Stepper.getStatus xStepper, Stepper.getStatus yStepper
+                    currentPos <- fetchPos ()
+                    currentStatus <- fetchStatus ()
                     
                     let xStatus, yStatus = currentStatus
                     if xStatus.Ready && yStatus.Ready then
                         readyEventInt.Trigger()
 
+                    if Stepper.Debug then
+                        printfn "X status: %A" xStatus
+                        printfn "Y status: %A" yStatus 
+                        printfn "Position: %A" currentPos
+
                     if homed && not (posInRange currentPos) then
+                        printfn "====== XYTable overshoot: %A" currentPos 
                         overshoot <- true
                         quickStop ()
+                        exit -1
+
+                    if xStatus.PosErr || yStatus.PosErr then
+                        printfn "====== XYTable position error"
+                        quickStop ()
+                        exit -1
                 )        
-                Thread.Yield() |> ignore                
+                Thread.Yield() |> ignore     
+                if Stepper.Debug then Thread.Sleep(500)           
         )
 
         let waitForReady() = async {
-            let xStatus, yStatus = currentStatus
-            if not (xStatus.Ready && yStatus.Ready) then
-                do! Async.AwaitEvent readyEvent
+            do! Async.AwaitEvent readyEvent
         }
 
         let agent =
@@ -287,79 +317,89 @@ module XYTable =
                         let vmActive = ref false
                         let vmVel = ref (0., 0.)
                         let vmAccel = ref (0., 0.)
-                        let vmDecel = ref (0., 0.)
+                        let xDeg mm = config.X.DegPerMM * mm
+                        let yDeg mm = config.Y.DegPerMM * mm
 
-                        let! msg, rc = inbox.Receive()
-                        if overshoot then failwith "XYTable position overshoot"
+                        let! msg, rc = inbox.Receive()                       
                         match msg with
                         | MsgHome ->
-                            sentinelThread.Start()
                             lock port (fun () ->
-                                Stepper.externalReferencing config.X.Home config.HomeVel config.DefaultAccel xStepper
-                                Stepper.externalReferencing config.Y.Home config.HomeVel config.DefaultAccel yStepper
+                                let {Stepper.PosErr=xPosErr}, {Stepper.PosErr=yPosErr} = fetchStatus ()
+                                let xHomed, yHomed = Stepper.isReferenced xStepper, Stepper.isReferenced yStepper
+                                let pos = fetchPos ()
+
+                                if (not xHomed) || (not yHomed) || xPosErr || yPosErr || (not (posInRange pos)) then
+                                    Stepper.resetPosErr 1000 xStepper
+                                    Stepper.resetPosErr 1000 yStepper
+                                    Stepper.externalReferencing config.X.Home (xDeg config.HomeVel) 
+                                        (xDeg config.DefaultAccel) xStepper
+                                    Stepper.externalReferencing config.Y.Home (yDeg config.HomeVel) 
+                                        (yDeg config.DefaultAccel) yStepper
                             )                            
+
+                            sentinelThread.Start()
                             do! waitForReady()
+                            do! Async.Sleep 100
                             homed <- true
-                            rc.Reply()
+                            rc.Reply ReplyOk
 
-                        | MsgDriveTo (pos, vel, accel, decel) ->
-                            if not homed then failwith "XYTable not homed"
+                        | MsgDriveTo (((xpos, ypos) as pos), (xvel, yvel), (xaccel, yaccel), (xdecel, ydecel)) ->
+                            if not (posInRange pos) then rc.Reply ReplyOutOfRange
+                            if not homed then rc.Reply ReplyNotHomed
+                            else 
+                                let xpos = if config.X.Home = Stepper.Right then -xpos else xpos
+                                let ypos = if config.Y.Home = Stepper.Right then -ypos else ypos
+                                lock port (fun () ->
+                                    Stepper.driveTo (xDeg xpos) (xDeg xvel) (xDeg xaccel) (xDeg xdecel) xStepper
+                                    Stepper.driveTo (yDeg ypos) (yDeg yvel) (yDeg yaccel) (yDeg ydecel) yStepper
+                                )
+                                do! waitForReady()
+                                rc.Reply ReplyOk
 
-                            let (xpos, ypos), (xvel, yvel), (xaccel, yaccel), (xdecel, ydecel) = 
-                                pos, vel, accel, decel
-                            lock port (fun () ->
-                                Stepper.driveTo xpos xvel xaccel xdecel xStepper
-                                Stepper.driveTo ypos yvel yaccel ydecel yStepper
-                            )
-                            do! waitForReady()
-                            rc.Reply()
-
-                        | MsgDriveWithVel (vel, accel, decel) ->
-                            if not homed then failwith "XYTable not homed"
-
-                            let (xvel, yvel), (xaccel, yaccel), (xdecel, ydecel) = 
-                                vel, accel, decel
-
-                            lock port (fun () ->
-                                if not !vmActive then
-                                    Stepper.startConstantVelocityDrive xvel xaccel xdecel xStepper
-                                    Stepper.startConstantVelocityDrive yvel yaccel ydecel yStepper
-                                    vmActive := true
-                                    vmVel := vel
-                                    vmAccel := accel
-                                    vmDecel := decel
-                                else
-                                    if accel <> !vmAccel || decel <> !vmDecel then
-                                        Stepper.adjustAccelDecel xaccel xdecel xStepper
-                                        Stepper.adjustAccelDecel yaccel ydecel yStepper
-                                        vmAccel := accel
-                                        vmDecel := decel
-                                    if vel <> !vmVel then
-                                        Stepper.adjustVelocity xvel xStepper
-                                        Stepper.adjustVelocity yvel yStepper
+                        | MsgDriveWithVel ((xvel, yvel as vel), (xaccel, yaccel as accel)) ->
+                            if not homed then rc.Reply ReplyNotHomed
+                            else
+                                lock port (fun () ->
+                                    if not !vmActive then
+                                        Stepper.startConstantVelocityDrive (xDeg xvel) (xDeg xaccel) (xDeg xaccel) xStepper
+                                        Stepper.startConstantVelocityDrive (yDeg yvel) (yDeg yaccel) (yDeg yaccel) yStepper
+                                        vmActive := true
                                         vmVel := vel
-                            )
-                            rc.Reply()
+                                        vmAccel := accel
+                                    else
+                                        if accel <> !vmAccel then
+                                            Stepper.adjustAccelDecel (xDeg xaccel) (xDeg xaccel) xStepper
+                                            Stepper.adjustAccelDecel (yDeg yaccel) (yDeg yaccel) yStepper
+                                            vmAccel := accel
+                                        if vel <> !vmVel then
+                                            Stepper.adjustVelocity (xDeg xvel) xStepper
+                                            Stepper.adjustVelocity (yDeg yvel) yStepper
+                                            vmVel := vel
+                                )
+                                rc.Reply ReplyOk
 
-                        | MsgStop decel ->      
-                            if not homed then failwith "XYTable not homed"
-
-                            let (xaccel, yaccel), (xdecel, ydecel) = !vmAccel, decel    
-                            
+                        | MsgStop (xaccel, yaccel as accel) ->      
                             lock port (fun () ->     
-                                if decel <> !vmDecel then
-                                    Stepper.adjustAccelDecel xaccel xdecel xStepper
-                                    Stepper.adjustAccelDecel yaccel ydecel yStepper
+                                if accel <> !vmAccel then
+                                    Stepper.adjustAccelDecel (xDeg xaccel) (xDeg xaccel) xStepper
+                                    Stepper.adjustAccelDecel (yDeg yaccel) (yDeg yaccel) yStepper
+                                    vmAccel := accel
                                 Stepper.stop xStepper
                                 Stepper.stop yStepper
                                 vmActive := false
                             )
                             do! waitForReady()
-                            rc.Reply()
+                            rc.Reply ReplyOk
                 }           
             )
 
-        let postMsg msg = agent.PostAndAsyncReply(fun rc -> msg, rc)
+        let postMsg msg = async {
+            let! reply = agent.PostAndAsyncReply(fun rc -> msg, rc)
+            match reply with
+            | ReplyOk -> ()
+            | ReplyNotHomed -> failwith "XYTable not homed"
+            | ReplyOutOfRange -> failwith "XYTable position out of range"
+        }
 
 
         member this.Pos = currentPos
@@ -373,15 +413,14 @@ module XYTable =
             let decel = defaultArg decel (config.DefaultAccel, config.DefaultAccel)
             postMsg (MsgDriveTo (pos, vel, accel, decel))
 
-        member this.DriveWithVel (vel, ?accel, ?decel) = 
+        member this.DriveWithVel (vel, ?accel) = 
             let accel = defaultArg accel (config.DefaultAccel, config.DefaultAccel)
-            let decel = defaultArg decel (config.DefaultAccel, config.DefaultAccel)       
-            postMsg (MsgDriveWithVel (vel, accel, decel))
+            postMsg (MsgDriveWithVel (vel, accel)) |> Async.RunSynchronously
 
-        member this.Stop (?decel) = 
-            let decel = defaultArg decel (config.DefaultAccel, config.DefaultAccel)       
-            postMsg (MsgStop (decel))
-
+        member this.Stop (?accel) = 
+            let accel = defaultArg accel (config.DefaultAccel, config.DefaultAccel)       
+            postMsg (MsgStop (accel)) |> Async.RunSynchronously
+            
         interface IDisposable with
             member this.Dispose () =
                 sentinelThreadShouldRun <- false
@@ -401,6 +440,7 @@ module XYTable =
 module XYTableTypes =
     type XYTableConfigT = XYTable.XYTableConfigT
     type XYTableT = XYTable.XYTableT
+
 
 
 
