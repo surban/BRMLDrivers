@@ -8,6 +8,9 @@ open System.Threading
 
 module LinmotIF =
 
+    [<Literal>]
+    let Debug = false
+
     type StateT =
         | NotReadyToSwitchOn
         | ReadyToSwitchOn
@@ -65,29 +68,44 @@ module LinmotIF =
         if value then x ||| (1u <<< bit)
         else x &&& ~~~(1u <<< bit)
 
+    let dumpMsg msg = 
+        for b in msg do
+            printf "%02x " (int b)
+
     let sendMsg dataGen linmot =
-        use w = new BinaryWriter (linmot.Port.BaseStream, Text.Encoding.ASCII, true)
+        if Debug then printf "TX "
 
-        // get data as byte array
-        use ms = new MemoryStream()       
-        use bw = new BinaryWriter (ms)       
-        let (mainId: byte), (subId: byte) = dataGen bw linmot
-        bw.Flush ()
-        let dataBuf = ms.GetBuffer()
+        // generate data
+        use dataMs = new MemoryStream()       
+        use dataBw = new BinaryWriter (dataMs)       
+        let (mainId: byte), (subId: byte) = dataGen dataBw linmot
+        dataBw.Flush ()
+        let dataBuf = dataMs.ToArray()
 
-        // send
+        // create msg with header and footer
+        use msgMs = new MemoryStream()
+        use w = new BinaryWriter(msgMs)
         w.Write (byte 0x01)
         w.Write (byte (linmot.Id))
         w.Write (byte (Array.length dataBuf + 3))
+        w.Write (byte 0x02)
         w.Write (byte subId)
         w.Write (byte mainId)
         w.Write (dataBuf)
         w.Write (byte 0x04)
+        w.Flush()
+
+        // send msg
+        let msg = msgMs.ToArray()
+        if Debug then printf ": "; dumpMsg msg; printfn ""
+        linmot.Port.Write(msg, 0, msg.Length)
 
     let genResponseReqWithWarnRequest w linmot =
+        if Debug then printf "ResponseReqWithWarnRequest"
         byte 0x00, byte 0x03
 
     let genWriteControl (control: Control) (w: BinaryWriter) linmot =
+        if Debug then printf "WriteControl %A" control
         let word =
             0u
             |> setBit 0 control.SwitchOn
@@ -104,12 +122,16 @@ module LinmotIF =
         byte 0x06, byte 0x01
     
     let genMotionCmd cmd (w: BinaryWriter) linmot =
+        if Debug then printf "MotionCmd (%02x)" cmd
+        linmot.MotionCmdCnt <- linmot.MotionCmdCnt + 1
         let word = (cmd &&& 0xfff0) ||| (linmot.MotionCmdCnt &&& 0x000f)
         linmot.MotionCmdCnt <- linmot.MotionCmdCnt + 1
+        if Debug then printf "MotionCmdWord (%04x)" word
         w.Write (uint16 word)
         byte 0x02, byte 0x00
 
     let genGoToPos pos vel accel decel w linmot =
+        if Debug then printf "GoToPos (%f, %f, %f, %f)" pos vel accel decel
         let ids = genMotionCmd 0x0100 w linmot
         w.Write (int32  (pos * 1E+4))
         w.Write (uint32 (vel * 1E+3))
@@ -118,21 +140,38 @@ module LinmotIF =
         ids
 
 
+    let readFromPort count linmot =
+        let buf: byte[] = Array.zeroCreate count
+        let mutable bytesRead = 0
+        while bytesRead < count do
+            let readCount = linmot.Port.Read(buf, bytesRead, count - bytesRead)
+            bytesRead <- bytesRead + readCount
+        buf
 
 
-    let recvResp dataParser linmot =       
-        use r = new BinaryReader (linmot.Port.BaseStream, Text.Encoding.ASCII, true)
-        if r.ReadByte() <> (byte 0x01) then failwith "received invalid header start byte"
-        let id = r.ReadByte()
-        if (int id) <> linmot.Id then failwith "received wrong linmot id"
-        let length = r.ReadByte()
-        if r.ReadByte() <> (byte 0x02) then failwith "received invalid data start byte"
-        let subId = r.ReadByte()
-        let mainId = r.ReadByte()
+    let recvResp dataParser linmot =             
+        // read and parse header
+        let buf = readFromPort 6 linmot
+        if Debug then printf "RX: "; dumpMsg buf
+        if buf.[0] <> (byte 0x01) then failwith "received invalid header start byte"
+        if (int buf.[1]) <> linmot.Id then failwith "received wrong linmot id"
+        let length = int buf.[2]
+        if buf.[3] <> (byte 0x02) then failwith "received invalid data start byte"
+        let subId = buf.[4]
+        let mainId = buf.[5]
 
+        // read payload data
+        let buf = readFromPort (length - 2) linmot
+        if Debug then dumpMsg buf
+
+        // parse
+        use ms = new MemoryStream (buf)
+        use r = new BinaryReader (ms, Text.Encoding.ASCII, true)
         let data = dataParser r (mainId, subId) linmot
 
-        if r.ReadByte() <> (byte 0x04) then failwith "received invalid end byte" 
+        if buf.[buf.Length - 1] <> (byte 0x04) then failwith "received invalid end byte" 
+        if Debug then printfn ""
+
         data
 
     let requireId (id: byte * byte) required =
@@ -175,9 +214,10 @@ module LinmotIF =
             MotionCmdCnt       = motionCmdCount;
         }
 
+        if Debug then printf "DefaultResponse %A" status
         status
 
-    let parseDefaultResponseWithWarnWord (r: BinaryReader) id linmot =
+    let parseDefaultResponseWithWarnWord (r: BinaryReader) id linmot =        
         let status = parseDefaultResponse r id linmot
 
         let warnWord = r.ReadUInt16()
@@ -186,6 +226,7 @@ module LinmotIF =
             PositionLag        = sBit 4;
         }
 
+        if Debug then printf "WithWarnWord %A" warn 
         status, warn
 
     let getStatus linmot =
@@ -211,7 +252,7 @@ module Linmot =
 
     type private MsgT =
         | MsgInit
-        | MsgHome
+        | MsgHome of bool
         | MsgDriveTo of float * float * float * float
         | MsgPower of bool
 
@@ -245,11 +286,12 @@ module Linmot =
                     statusUpdatedEventInt.Trigger currentStatus
                 )                
                 Thread.Yield () |> ignore
+                if Debug then Thread.Sleep (1000) |> ignore
             )
 
-        let rec waitForState checker = async {
+        let rec waitForState cond = async {
             let! sts, _ = Async.AwaitEvent statusUpdatedEvent
-            if not (checker sts) then do! waitForState checker
+            if not (cond sts) then do! waitForState cond
         }
             
         let agent =
@@ -259,11 +301,14 @@ module Linmot =
                         let! msg, rc = inbox.Receive()                       
                         match msg with
                         | MsgInit ->
+                            statusThread.Start()
                             let sts, _ = currentStatus
                             if not sts.OpEnabled then
+                                if Debug then printfn "Performing ErrorAck"
                                 lock linmot (fun() -> 
                                     sendAndRecvAck (genWriteControl {IdleCntrl with SwitchOn=false; EnableOp=false; ErrorAck=true; }) linmot)
                                 do! waitForState (fun s -> s.State = ReadyToSwitchOn)
+                                if Debug then printfn "Enabling operation"
                                 lock linmot (fun() ->
                                     sendAndRecvAck (genWriteControl IdleCntrl) linmot)
                                 do! waitForState (fun s -> s.State = OperationEnabled)
@@ -273,19 +318,22 @@ module Linmot =
 
                             rc.Reply ReplyOk
 
-                        | MsgHome ->
-                            lock linmot (fun() -> 
-                                sendAndRecvAck (genWriteControl {IdleCntrl with Home=true;}) linmot)
-                            do! waitForState (fun s -> s.State = Homing && s.Finished)
-                            lock linmot (fun() ->
-                                sendAndRecvAck (genWriteControl IdleCntrl) linmot)
-                            do! waitForState (fun s -> s.State = OperationEnabled)
+                        | MsgHome force ->
+                            let sts, _ = currentStatus
+                            if not sts.Homed || force then
+                                lock linmot (fun() -> 
+                                    sendAndRecvAck (genWriteControl {IdleCntrl with Home=true;}) linmot)
+                                do! waitForState (fun s -> s.State = Homing && s.Finished)
+                                lock linmot (fun() ->
+                                    sendAndRecvAck (genWriteControl IdleCntrl) linmot)
+                                do! waitForState (fun s -> s.State = OperationEnabled)
                             rc.Reply ReplyOk
 
                         | MsgDriveTo (pos, vel, accel, decel) ->
                             lock linmot (fun() ->
                                 sendAndRecvAck (genGoToPos pos vel accel decel) linmot)
                             do! waitForState (fun s -> s.State = OperationEnabled && not s.MotionActive && s.InTargetPos)
+                            rc.Reply ReplyOk
 
                         | MsgPower pwr ->
                             lock linmot (fun() -> 
@@ -308,7 +356,9 @@ module Linmot =
             let sts, _ = currentStatus
             sts.Pos
 
-        member this.Home () = postMsg MsgHome
+        member this.Home (?force) =     
+            let force = defaultArg force false
+            postMsg (MsgHome force)
 
         member this.DriveTo (pos, ?vel, ?accel, ?decel) =
             let vel = defaultArg vel config.DefaultVel

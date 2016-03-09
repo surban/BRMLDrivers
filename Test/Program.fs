@@ -1,6 +1,8 @@
 ﻿open BRML.Drivers
 
+open System
 open System.Threading
+
 
 let tblCfg : XYTableConfigT = {
         PortName       = "COM7";
@@ -26,37 +28,70 @@ let linmotCfg: LinmotCfgT = {
         DefaultAccel   = 200.0;    
 }
 
-let demoTable () =
-    use xyTable = new XYTableT(tblCfg)
-
-    printf "Homing..."
-    xyTable.Home() |> Async.RunSynchronously
+let demoTable (xyTable: XYTableT) = async {
+    printf "Homing XYTable..."
+    do! xyTable.Home() 
     printfn "Done."
 
     printfn "Drive to center"
-    xyTable.DriveTo((70., 70.)) |> Async.RunSynchronously
+    do! xyTable.DriveTo((70., 70.)) 
 
     printfn "Drive with constant velocity"
     xyTable.DriveWithVel ((10., 10.)) 
 
-    Thread.Sleep 5000
+    do! Async.Sleep 2000
+
+    printfn "Stop."
+    xyTable.Stop ()
+
+
+    let rng = Random()
+
+    for i = 1 to 20 do
+        let xpos = rng.NextDouble() * tblCfg.X.MaxPos
+        let ypos = rng.NextDouble() * tblCfg.Y.MaxPos
+        let pos = xpos, ypos
+        printfn "Drive to %A" pos
+        do! xyTable.DriveTo(pos)
+
     //printfn "Exception..."
     //failwith "my error"
+}
 
 
-let demoLinmot () =
-    use linmot = new LinmotT(linmotCfg)
+let demoLinmot (linmot: LinmotT) = async {
+    let rng = Random()
+    for i = 1 to 150 do
+        let pos = rng.NextDouble() * (-20.)
+        printfn "Drive to %f" pos
+        do! linmot.DriveTo (pos)
 
-    printf "Homing..."
-    linmot.Home() |> Async.RunSynchronously
-    printfn "Done."
+    //printfn "Power off"
+    //do! linmot.Power false 
+}
+
+
+let doDemo linmot xyTable = async {
+    let! dl = demoLinmot linmot |> Async.StartChild
+    let! dt = demoTable xyTable |> Async.StartChild
+
+    let! dtRes = dt
+    let! dlRec = dl
+    ()
+}
 
 
 [<EntryPoint>]
 let main argv = 
+    use linmot = new LinmotT(linmotCfg)
+    use xyTable = new XYTableT(tblCfg)
 
-    demoLinmot ()
+    printf "Homing Linmot..."
+    linmot.Home(false) |> Async.RunSynchronously
+    linmot.DriveTo(-1.) |> Async.RunSynchronously
+    printfn "Done."    
 
-    Thread.Sleep 3000
-    printfn "Exiting."
+    doDemo linmot xyTable |> Async.RunSynchronously
+
+    printfn "All done."
     0 
