@@ -231,6 +231,7 @@ module XYTable =
     type MsgWithReplyT = MsgT * AsyncReplyChannel<ReplyT>
 
     type XYTableT (config: XYTableConfigT) =
+        inherit System.Runtime.ConstrainedExecution.CriticalFinalizerObject()
 
         let port = new SerialPort(config.PortName, config.PortBaud)     
         do
@@ -245,7 +246,7 @@ module XYTable =
             for i = 1 to 10 do
                 Stepper.quickStop xStepper
                 Stepper.quickStop yStepper
-
+    
         let posInRange (x, y) =
             -0.2 <= x && x <= config.X.MaxPos && -0.2 <= y && y <= config.Y.MaxPos
 
@@ -401,6 +402,18 @@ module XYTable =
             | ReplyOutOfRange -> failwith "XYTable position out of range"
         }
 
+        let terminate () =
+            //printfn "Terminate"
+            if not disposed then
+                sentinelThreadShouldRun <- false                
+                sentinelThread.Join ()
+                quickStop ()                     
+
+        do
+            AppDomain.CurrentDomain.ProcessExit.Add(fun _ -> terminate())
+            AppDomain.CurrentDomain.UnhandledException.Add(fun _ -> terminate())
+            AppDomain.CurrentDomain.DomainUnload.Add(fun _ -> terminate())
+            Console.CancelKeyPress.Add(fun _ -> terminate())
 
         member this.Pos = currentPos
         
@@ -420,20 +433,19 @@ module XYTable =
         member this.Stop (?accel) = 
             let accel = defaultArg accel (config.DefaultAccel, config.DefaultAccel)       
             postMsg (MsgStop (accel)) |> Async.RunSynchronously
-            
+
+
         interface IDisposable with
             member this.Dispose () =
-                sentinelThreadShouldRun <- false
-                sentinelThread.Join ()
-                quickStop ()
+                terminate ()
                 port.Dispose()
                 disposed <- true
 
         override this.Finalize() =
-            if not disposed then
-                sentinelThreadShouldRun <- false
-                sentinelThread.Join ()
-                quickStop ()
+            terminate ()
+
+
+
 
 
 [<AutoOpen>]
