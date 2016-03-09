@@ -405,8 +405,8 @@ module XYTable =
         let terminate () =
             //printfn "Terminate"
             if not disposed then
-                sentinelThreadShouldRun <- false                
-                sentinelThread.Join ()
+                sentinelThreadShouldRun <- false         
+                if sentinelThread.IsAlive then sentinelThread.Join ()
                 quickStop ()                     
 
         do

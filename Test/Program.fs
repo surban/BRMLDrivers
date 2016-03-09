@@ -70,6 +70,14 @@ let demoLinmot (linmot: LinmotT) = async {
     //do! linmot.Power false 
 }
 
+let demoBiotac (biotac: BiotacT) =
+
+    for i = 1 to 100 do
+        let data = biotac.Samples |> Seq.toList
+        printfn "Samples:\n%A" data
+        //failwith "crash"
+        //exit 1
+
 
 let doDemo linmot xyTable = async {
     let! dl = demoLinmot linmot |> Async.StartChild
@@ -83,15 +91,19 @@ let doDemo linmot xyTable = async {
 
 [<EntryPoint>]
 let main argv = 
-    use linmot = new LinmotT(linmotCfg)
-    use xyTable = new XYTableT(tblCfg)
+    //use linmot = new LinmotT(linmotCfg)
+    //use xyTable = new XYTableT(tblCfg)
+    use biotac = new BiotacT(0)
 
     printf "Homing Linmot..."
-    linmot.Home(false) |> Async.RunSynchronously
-    linmot.DriveTo(-1.) |> Async.RunSynchronously
+    //linmot.Home(false) |> Async.RunSynchronously
+    //linmot.DriveTo(-1.) |> Async.RunSynchronously
     printfn "Done."    
 
-    doDemo linmot xyTable |> Async.RunSynchronously
+    //doDemo linmot xyTable |> Async.RunSynchronously
+
+    demoBiotac biotac
+
 
     printfn "All done."
     0 
