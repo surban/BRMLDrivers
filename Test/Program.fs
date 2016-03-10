@@ -72,11 +72,9 @@ let demoLinmot (linmot: LinmotT) = async {
 
 let demoBiotac (biotac: BiotacT) =
 
-    for i = 1 to 100 do
-        let data = biotac.Samples |> Seq.toList
+    for i = 1 to 30 do
+        let data = biotac.GetSamples() |> Seq.toList
         printfn "Samples:\n%A" data
-        //failwith "crash"
-        //exit 1
 
 
 let doDemo linmot xyTable = async {
@@ -103,7 +101,6 @@ let main argv =
     //doDemo linmot xyTable |> Async.RunSynchronously
 
     demoBiotac biotac
-
 
     printfn "All done."
     0 

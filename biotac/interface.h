@@ -19,9 +19,10 @@ typedef struct _biotac_frame
 } biotac_frame;
 
 
-int DeclSpec biotac_init(unsigned int biotac_index);
+int DeclSpec biotac_init();
 void DeclSpec biotac_close();
-void DeclSpec biotac_get_latest_data_array(biotac_frame *array, size_t *samples);
+size_t DeclSpec biotac_get_n_samples(); 
+size_t DeclSpec biotac_get_latest_data_array(unsigned int biotac_index, biotac_frame *array, size_t samples);
 
 #ifdef __cplusplus
 }
