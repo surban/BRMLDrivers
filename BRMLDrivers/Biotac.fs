@@ -34,10 +34,12 @@ module Biotac =
     type BiotacT (index: int) =
         let mutable disposed = false
 
+        // initialize biotac
         do
             let res = biotac_init()
             if res = 0 then failwith "Biotac initialization failed"
 
+        /// maximum number of samples 
         let nMaxSamples = biotac_get_n_samples()
 
         /// Gets the latest available samples.
