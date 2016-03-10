@@ -72,7 +72,7 @@ let demoLinmot (linmot: LinmotT) = async {
 
 let demoBiotac (biotac: BiotacT) =
 
-    for i = 1 to 30 do
+    for i = 1 to 3 do
         let data = biotac.GetSamples() |> Seq.toList
         printfn "Samples:\n%A" data
 

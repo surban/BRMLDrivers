@@ -111,9 +111,9 @@ Cheetah bt_cheetah_initialize(const bt_info *biotac)
     int count;
 
     // Find all the attached Cheetah devices
- 	printf("Searching for Cheetah adapters...\n");
+ 	//printf("Searching for Cheetah adapters...\n");
  	count = ch_find_devices_ext(nelem, ports, nelem, unique_ids);
-    printf("%d device(s) found:\n", count);
+    //printf("%d device(s) found:\n", count);
 
     // Check the number of Cheetah devices found
     if (count == 0)
@@ -138,10 +138,10 @@ Cheetah bt_cheetah_initialize(const bt_info *biotac)
         }
 
         // Display device port number, in-use status, and serial number
-        printf("    port=%-3d %s (%04d-%06d)\n",
-               ports[i], status,
-               unique_ids[i]/1000000,
-               unique_ids[i]%1000000);
+        //printf("    port=%-3d %s (%04d-%06d)\n",
+        //       ports[i], status,
+        //       unique_ids[i]/1000000,
+        //       unique_ids[i]%1000000);
 
         // Open the device
         ch_handle = ch_open(ports[i]);
@@ -152,22 +152,22 @@ Cheetah bt_cheetah_initialize(const bt_info *biotac)
         	exit(1);
         }
 
-        printf("Opened Cheetah device on port %d\n", ports[i]);
+        //printf("Opened Cheetah device on port %d\n", ports[i]);
 
-        printf("Host interface is %s\n", (ch_host_ifce_speed(ch_handle)) ? "high speed" : "full speed");
+        //printf("Host interface is %s\n", (ch_host_ifce_speed(ch_handle)) ? "high speed" : "full speed");
 
         // Ensure that the SPI subsystem is configured
         ch_spi_configure(ch_handle, (mode >> 1), mode & 1, CH_SPI_BITORDER_MSB, 0x0);
-        printf("SPI configuration set to mode %d, MSB shift, SS[2:0] active low\n", mode);
-        fflush(stdout);
+        //printf("SPI configuration set to mode %d, MSB shift, SS[2:0] active low\n", mode);
+        //fflush(stdout);
 
 		ch_target_power(ch_handle, CH_TARGET_POWER_ON);
 		ch_sleep_ms(100);
 
 		// Set the spi_clock_speed
 		ch_spi_bitrate(ch_handle, biotac->spi_clock_speed);
-		printf("Bitrate set to %d kHz\n", biotac->spi_clock_speed);
-		fflush(stdout);
+		//printf("Bitrate set to %d kHz\n", biotac->spi_clock_speed);
+		//fflush(stdout);
 	
 		/* PLACEHOLDER FOR FUTURE BIOTAC PROPERTY MEASUREMENTS */
 
@@ -292,11 +292,12 @@ BioTac bt_cheetah_get_properties(Cheetah ch_handle, int bt_select, bt_property *
 	}
 
 	// Print out properties of the BioTac(s)
-	printf("\n------- BioTac %d -------\n", bt_select);
+	//printf("\n------- BioTac %d -------\n", bt_select);
 
 	if (property->serial_number[0] == 'B' && property->serial_number[1] == 'T')
 	{
 		property->bt_connected = YES;
+#if 0
 		if(property->firmware_version[0] == '0' && property->firmware_version[1] == '2')
 		{
 			printf("Flex Version:\t\t %c.%c\n", property->flex_version[0],  property->flex_version[1]);
@@ -321,15 +322,17 @@ BioTac bt_cheetah_get_properties(Cheetah ch_handle, int bt_select, bt_property *
             printf("Serial Number:\t\t %s\n", property->serial_number);
             printf("CPU Speed:\t\t %.1f MIPS\n", (double)(property->cpu_speed.value/(double)1000));
 		}
+#endif
 	}
 	else
 	{
 		property->bt_connected = NO;
-
+#if 0
 		printf("Flex Version:\t\t %s\n", "N/A");
 		printf("Software Version:\t %s\n", "N/A");
 		printf("Serial Number:\t\t %s\n", "N/A");
 		printf("CPU Speed:\t\t %s\n", "N/A");
+#endif
 	}
 
 	return bt_err_code;

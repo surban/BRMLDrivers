@@ -80,10 +80,6 @@ bool biotac_hardware_init()
 		bt_display_errors(bt_err_code);
 		return false;
 	}
-	else
-	{
-		printf("\n%d BioTac(s) detected.\n\n", biotac.number_of_biotacs);
-	}
 
 	bt_init_frame_and_batch_info(&biotac);
 
