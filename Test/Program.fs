@@ -71,16 +71,30 @@ let demoLinmot (linmot: LinmotT) = async {
 }
 
 let demoBiotac (biotac: BiotacT) =
-    let nSamples = 100
+    let nSamples = 1000
+
+    printf "Waiting for biotac initialization..."
+    biotac.GetNextSample () |> ignore
+    printfn "Done."
+    printfn "Biotac serial: %s" biotac.Serial.Value
 
     let sw = System.Diagnostics.Stopwatch.StartNew()
     for i = 1 to nSamples do
-        let data = biotac.GetSamples() |> Seq.toList
-        ()
-        //printfn "Samples:\n%A" data
+        biotac.GetNextSample() |> ignore
     let duration = sw.ElapsedMilliseconds
     let freq = (float nSamples) / ((float duration) / 1000.)
     printfn "Biotac sampling rate: %f Hz" freq
+    printfn ""
+
+    let sx, sy = Console.CursorLeft, Console.CursorTop
+    while not Console.KeyAvailable do
+        Console.CursorLeft <- sx
+        Console.CursorTop <- sy
+
+        let smpl = biotac.GetNextSample()
+        for chnl in smpl.Flat do
+            printf "%04x " chnl  
+        printfn ""
 
 
 let doDemo linmot xyTable = async {
@@ -97,7 +111,7 @@ let doDemo linmot xyTable = async {
 let main argv = 
     //use linmot = new LinmotT(linmotCfg)
     //use xyTable = new XYTableT(tblCfg)
-    use biotac = new BiotacT(0)
+    use biotac = new BiotacT(uint32 1364033083, 0)
 
     printf "Homing Linmot..."
     //linmot.Home(false) |> Async.RunSynchronously
