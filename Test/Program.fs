@@ -67,7 +67,7 @@ let demoTablePos (xyTable: XYTableT) =
     xyTable.Home() |> Async.RunSynchronously
     xyTable.DriveTo((70., 70.)) |> Async.RunSynchronously
 
-    printfn "Drive with constant velocity"
+    //printfn "Drive with constant velocity"
     xyTable.DriveWithVel ((3., -5.)) 
 
     let rng = Random()
@@ -83,7 +83,7 @@ let demoTablePos (xyTable: XYTableT) =
     xyTable.PosSampleInterval <- 50
     xyTable.PosAcquired |> Event.add (fun (xpos, ypos) ->
         if !showPos then
-            printf "Position: x=%f    y=%f    \r" xpos ypos
+            //printf "Position: x=%f    y=%f    \r" xpos ypos
             nPosSamples := !nPosSamples + 1
     )
 
@@ -120,7 +120,7 @@ let demoTablePos (xyTable: XYTableT) =
 
 let demoLinmot (linmot: LinmotT) = async {
     let rng = Random()
-    for i = 1 to 150 do
+    for i = 1 to 20 do
         let pos = rng.NextDouble() * (-20.)
         //printfn "Drive to %f" pos
         do! linmot.DriveTo (pos)
@@ -145,6 +145,7 @@ let demoBiotac (biotac: BiotacT) =
     printfn "Biotac sampling rate: %f Hz" freq
     printfn ""
 
+    (*
     let sx, sy = Console.CursorLeft, Console.CursorTop
     while not Console.KeyAvailable do
         Console.CursorLeft <- sx
@@ -154,16 +155,8 @@ let demoBiotac (biotac: BiotacT) =
         for chnl in smpl.Flat do
             printf "%04x " chnl  
         printfn ""
+    *)
 
-
-let doDemo linmot xyTable = async {
-    let! dl = demoLinmot linmot |> Async.StartChild
-    let! dt = demoTable xyTable |> Async.StartChild
-
-    let! dtRes = dt
-    let! dlRec = dl
-    ()
-}
 
 
 [<EntryPoint>]
@@ -172,18 +165,18 @@ let main argv =
     use xyTable = new XYTableT(tblCfg)
     use biotac = new BiotacT(biotacCfg)
 
-//    printf "Homing Linmot..."
-//    linmot.Home(false) |> Async.RunSynchronously
-//    linmot.DriveTo(-1.) |> Async.RunSynchronously
-//    printfn "Done."    
+    printf "Homing Linmot..."
+    linmot.Home(false) |> Async.RunSynchronously
+    linmot.DriveTo(-1.) |> Async.RunSynchronously
+    printfn "Done."    
 
-    //doDemo linmot xyTable |> Async.Start
+    let demoLinmot = demoLinmot linmot |> Async.StartAsTask  
+    let demoTbl = async { demoTablePos xyTable } |> Async.StartAsTask
+    let demoBt = async { demoBiotac biotac } |> Async.StartAsTask
 
-    //demoTable xyTable |> Async.Start
-    demoTablePos xyTable
-
-
-    //demoBiotac biotac
+    demoBt.Wait()
+    demoTbl.Wait()
+    demoLinmot.Wait()
 
     printfn "All done."
     0 

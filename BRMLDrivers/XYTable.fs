@@ -475,9 +475,11 @@ module XYTable =
         let terminate () =
             //printfn "Terminate"
             if not disposed then
-                sentinelThreadShouldRun <- false         
-                if sentinelThread.IsAlive then sentinelThread.Join ()
-                quickStop ()                     
+                try
+                    sentinelThreadShouldRun <- false         
+                    if sentinelThread.IsAlive then sentinelThread.Join ()
+                finally
+                    quickStop ()                     
 
         do
             AppDomain.CurrentDomain.ProcessExit.Add(fun _ -> terminate())
