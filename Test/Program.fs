@@ -71,10 +71,16 @@ let demoLinmot (linmot: LinmotT) = async {
 }
 
 let demoBiotac (biotac: BiotacT) =
+    let nSamples = 100
 
-    for i = 1 to 3 do
+    let sw = System.Diagnostics.Stopwatch.StartNew()
+    for i = 1 to nSamples do
         let data = biotac.GetSamples() |> Seq.toList
-        printfn "Samples:\n%A" data
+        ()
+        //printfn "Samples:\n%A" data
+    let duration = sw.ElapsedMilliseconds
+    let freq = (float nSamples) / ((float duration) / 1000.)
+    printfn "Biotac sampling rate: %f Hz" freq
 
 
 let doDemo linmot xyTable = async {
