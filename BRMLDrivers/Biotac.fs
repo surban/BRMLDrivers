@@ -64,9 +64,13 @@ module Biotac =
         ByChannel:      Map<BioTacChannelT, BioTacValueT>
     }
 
+    type BioTacCfgT = {
+        Cheetah:        Cheetah.Uid
+        Index:          int
+    }
+
     /// Biotac sensor
-    type BiotacT (cheetahUid:   Cheetah.Uid, 
-                  index:        int) =
+    type BiotacT (config: BioTacCfgT) =
 
         let SpiBitrate =        4400          // kHz
         let AfterSampleDelay =  50000         // ns
@@ -79,7 +83,7 @@ module Biotac =
 
         /// chip select on for specified biotac
         let ssOn =
-            match index with
+            match config.Index with
             | 0 -> byte 1
             | 1 -> byte 2
             | 2 -> byte 4
@@ -98,7 +102,7 @@ module Biotac =
         let mutable acquisitionEnabled = true
 
         let acquisitionThread = Thread(fun () ->
-            let cheetah = Cheetah.openDeviceById cheetahUid
+            let cheetah = Cheetah.openDeviceById config.Cheetah
 
             // configure SPI settings
             CheetahApi.ch_spi_configure (cheetah, 
@@ -146,7 +150,7 @@ module Biotac =
 
             // check if biotac is present
             if not (serialBuf.Length > 2 && serialBuf.[0..1] = "BT") then
-                failwithf "biotac not detected at index %d" index
+                failwithf "biotac not detected on cheetah %d at index %d" config.Cheetah config.Index
             serial <- Some serialBuf
 
             // build cheetah SPI batch for obtaining a sample from the biotac
