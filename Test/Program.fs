@@ -112,10 +112,10 @@ let demoTablePos (xyTable: XYTableT) =
 
     xyTable.Stop()
     
-    let sendDur = float Stepper.sendTime / float Stepper.sendReqs
-    let recvDur = float Stepper.recvTime / float Stepper.recvReqs
-    printfn "Send time per req: %f ms" sendDur
-    printfn "Recv time per req: %f ms" recvDur
+    //let sendDur = float Stepper.sendTime / float Stepper.sendReqs
+    //let recvDur = float Stepper.recvTime / float Stepper.recvReqs
+    //printfn "Send time per req: %f ms" sendDur
+    //printfn "Recv time per req: %f ms" recvDur
 
 
 let demoLinmot (linmot: LinmotT) = async {

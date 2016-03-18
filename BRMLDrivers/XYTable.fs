@@ -52,10 +52,12 @@ module Stepper =
 
     type private MsgT = Msg of string * int option
         
+    #if MeasureTiming
     let mutable sendReqs = 0
     let mutable recvReqs = 0
     let mutable sendTime = int64 0
     let mutable recvTime = int64 0
+    #endif
 
     let private sendMsg (Msg (cmd, arg)) (stepper: StepperT) =
         let argStr =
@@ -65,22 +67,30 @@ module Stepper =
         let msgStr = sprintf "#%d%s%s\r" stepper.Id cmd argStr
         if Debug then printfn "sending: %s" msgStr
 
+        #if MeasureTiming 
         let sw = Stopwatch.StartNew()
         stepper.Port.Write msgStr
         sendTime <- sendTime + sw.ElapsedMilliseconds
         sendReqs <- sendReqs + 1
+        #else
+        stepper.Port.Write msgStr
+        #endif
 
     let private receiveMsg (stepper: StepperT) = 
         if not stepper.Echo then
             printfn "cannot receive message when echo is disabled"
             exit 1
 
+        #if MeasureTiming
         let sw = Stopwatch.StartNew()
         let msgStr = stepper.Port.ReadTo "\r"
-        if Debug then printfn "received: %s" msgStr
         recvTime <- recvTime + sw.ElapsedMilliseconds
         recvReqs <- recvReqs + 1
+        #else
+        let msgStr = stepper.Port.ReadTo "\r"
+        #endif
 
+        if Debug then printfn "received: %s" msgStr            
         let m = Regex.Match(msgStr, @"^(\d+)([!-*,./:-~]+)([+-]?\d+)?$")
         if not m.Success then
             failwithf "Stepper received malformed reply message: %s" msgStr
