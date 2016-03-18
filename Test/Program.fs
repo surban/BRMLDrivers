@@ -80,7 +80,7 @@ let demoTablePos (xyTable: XYTableT) =
 
     let showPos = ref true
 
-    xyTable.PosSampleInterval <- 50
+    xyTable.PosSampleInterval <- 60
     xyTable.PosAcquired |> Event.add (fun (xpos, ypos) ->
         if !showPos then
             //printf "Position: x=%f    y=%f    \r" xpos ypos
@@ -97,6 +97,7 @@ let demoTablePos (xyTable: XYTableT) =
 
         xvel <- xvel + 0.1 * rndSpeed()
         yvel <- yvel + 0.1 * rndSpeed()
+        //Thread.Sleep(10)
         xyTable.DriveWithVel ((xvel, yvel))
 
 
